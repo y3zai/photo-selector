@@ -1,11 +1,33 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { FolderOpen, Heart, ChevronLeft, ChevronRight, X, AlertCircle, ExternalLink, Github } from 'lucide-react';
 
 interface Photo {
   handle: any;
   name: string;
-  url: string;
+  thumbUrl: string;
   isFavorite: boolean;
+}
+
+const THUMBNAIL_WIDTH = 400;
+const BATCH_SIZE = 8;
+
+async function createThumbnail(file: File): Promise<string> {
+  try {
+    const bitmap = await createImageBitmap(file, {
+      resizeWidth: THUMBNAIL_WIDTH,
+      resizeQuality: 'medium',
+    });
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('2D context unavailable');
+    ctx.drawImage(bitmap, 0, 0);
+    bitmap.close();
+    const blob = await canvas.convertToBlob({ type: 'image/webp', quality: 0.8 });
+    return URL.createObjectURL(blob);
+  } catch {
+    // Fallback: use the original file (rare formats createImageBitmap can't decode)
+    return URL.createObjectURL(file);
+  }
 }
 
 export default function App() {
@@ -14,9 +36,14 @@ export default function App() {
   const [favHandle, setFavHandle] = useState<any | null>(null);
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [loading, setLoading] = useState(false);
+  const [scanProgress, setScanProgress] = useState<{ loaded: number; total: number } | null>(null);
   const [immersiveIndex, setImmersiveIndex] = useState<number | null>(null);
+  const [immersiveUrl, setImmersiveUrl] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [filter, setFilter] = useState<'all' | 'favorites'>('all');
+
+  // Used to cancel in-flight folder scans when the user re-selects
+  const scanIdRef = useRef(0);
 
   const filteredPhotos = useMemo(() => {
     return photos.filter(p => filter === 'all' || p.isFavorite);
@@ -65,38 +92,112 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [immersiveIndex, filteredPhotos, favHandle, photos]);
 
+  // Load the full-resolution file on demand for the immersive view,
+  // keyed on photo name so we don't re-fetch when `photos` changes.
+  const immersivePhoto = immersiveIndex !== null ? filteredPhotos[immersiveIndex] : null;
+  const immersiveName = immersivePhoto?.name ?? null;
+  useEffect(() => {
+    if (!immersiveName) {
+      setImmersiveUrl(null);
+      return;
+    }
+    const photo = photos.find(p => p.name === immersiveName);
+    if (!photo) return;
+
+    let cancelled = false;
+    let url: string | null = null;
+    photo.handle.getFile().then((file: File) => {
+      if (cancelled) return;
+      url = URL.createObjectURL(file);
+      setImmersiveUrl(url);
+    }).catch((err: any) => {
+      console.error('Failed to load full-resolution image', err);
+    });
+
+    return () => {
+      cancelled = true;
+      if (url) URL.revokeObjectURL(url);
+      setImmersiveUrl(null);
+    };
+  }, [immersiveName]);
+
   const handleSelectFolder = async () => {
     setErrorMsg(null);
     try {
       const handle = await (window as any).showDirectoryPicker({ mode: 'readwrite' });
+
+      // Start a new scan; invalidate any previous one and free its thumbnails.
+      const scanId = ++scanIdRef.current;
+      setPhotos(prev => {
+        prev.forEach(p => URL.revokeObjectURL(p.thumbUrl));
+        return [];
+      });
+      setImmersiveIndex(null);
       setDirHandle(handle);
       setLoading(true);
-      
+
       const favoritesDir = await handle.getDirectoryHandle('favorites', { create: true });
       setFavHandle(favoritesDir);
 
       const favNames = new Set<string>();
       for await (const [name, entry] of favoritesDir.entries()) {
-        if (entry.kind === 'file') {
-          favNames.add(name);
+        if (entry.kind === 'file') favNames.add(name);
+      }
+
+      // Enumerate image entries first (fast — just directory listing).
+      const imageEntries: Array<{ name: string; entry: any }> = [];
+      for await (const [name, entry] of handle.entries()) {
+        if (scanIdRef.current !== scanId) return;
+        if (entry.kind === 'file' && name.match(/\.(jpe?g|png|webp|gif)$/i)) {
+          imageEntries.push({ name, entry });
         }
       }
 
-      const loadedPhotos: Photo[] = [];
-      for await (const [name, entry] of handle.entries()) {
-        if (entry.kind === 'file' && name.match(/\.(jpe?g|png|webp|gif)$/i)) {
+      setLoading(false);
+      if (imageEntries.length === 0) {
+        setScanProgress(null);
+        return;
+      }
+      setScanProgress({ loaded: 0, total: imageEntries.length });
+
+      // Generate thumbnails progressively, flushing in batches so tiles appear as they finish.
+      let batch: Photo[] = [];
+      let loaded = 0;
+      for (const { name, entry } of imageEntries) {
+        if (scanIdRef.current !== scanId) return;
+        try {
           const file = await entry.getFile();
-          const url = URL.createObjectURL(file);
-          loadedPhotos.push({
+          const thumbUrl = await createThumbnail(file);
+          batch.push({
             handle: entry,
             name,
-            url,
-            isFavorite: favNames.has(name)
+            thumbUrl,
+            isFavorite: favNames.has(name),
           });
+        } catch (err) {
+          console.error(`Failed to load ${name}`, err);
         }
+        loaded++;
+
+        if (batch.length >= BATCH_SIZE) {
+          if (scanIdRef.current !== scanId) {
+            batch.forEach(p => URL.revokeObjectURL(p.thumbUrl));
+            return;
+          }
+          const toAdd = batch;
+          batch = [];
+          setPhotos(prev => [...prev, ...toAdd]);
+        }
+        setScanProgress({ loaded, total: imageEntries.length });
       }
-      
-      setPhotos(loadedPhotos);
+      if (batch.length > 0) {
+        if (scanIdRef.current !== scanId) {
+          batch.forEach(p => URL.revokeObjectURL(p.thumbUrl));
+          return;
+        }
+        setPhotos(prev => [...prev, ...batch]);
+      }
+      setScanProgress(null);
     } catch (err: any) {
       console.error(err);
       if (err.name === 'SecurityError') {
@@ -104,7 +205,7 @@ export default function App() {
       } else if (err.name !== 'AbortError') {
         setErrorMsg(err.message || 'Failed to open directory.');
       }
-    } finally {
+      setScanProgress(null);
       setLoading(false);
     }
   };
@@ -115,7 +216,7 @@ export default function App() {
     if (index === -1) return;
     const photo = photos[index];
     const newPhotos = [...photos];
-    
+
     try {
       if (photo.isFavorite) {
         await favHandle.removeEntry(photo.name);
@@ -142,7 +243,7 @@ export default function App() {
           <AlertCircle className="w-12 h-12 text-red-500 mx-auto" />
           <h1 className="text-2xl font-bold text-white">Browser Not Supported</h1>
           <p className="text-neutral-400">
-            Your browser does not support the File System Access API required for this app. 
+            Your browser does not support the File System Access API required for this app.
             Please try using a Chromium-based browser like Chrome or Edge on desktop.
           </p>
         </div>
@@ -204,11 +305,11 @@ export default function App() {
         {loading && (
           <div className="flex flex-col items-center justify-center h-[60vh] space-y-4">
             <div className="animate-spin rounded-full h-10 w-10 border-2 border-neutral-800 border-t-white"></div>
-            <p className="text-neutral-400 animate-pulse">Loading photos...</p>
+            <p className="text-neutral-400 animate-pulse">Scanning folder...</p>
           </div>
         )}
 
-        {dirHandle && !loading && photos.length === 0 && (
+        {dirHandle && !loading && photos.length === 0 && scanProgress === null && (
           <div className="flex flex-col items-center justify-center h-[60vh] text-neutral-500 space-y-4">
             <div className="w-20 h-20 rounded-full bg-neutral-900 flex items-center justify-center border border-neutral-800">
               <AlertCircle className="w-8 h-8 opacity-50" />
@@ -218,29 +319,37 @@ export default function App() {
           </div>
         )}
 
-        {photos.length > 0 && (
+        {!loading && (photos.length > 0 || scanProgress) && (
           <>
-            <div className="mb-6 flex items-center gap-2 bg-neutral-900 w-fit p-1 rounded-lg border border-neutral-800">
-              <button
-                onClick={() => setFilter('all')}
-                className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                  filter === 'all' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'
-                }`}
-              >
-                All Photos
-              </button>
-              <button
-                onClick={() => setFilter('favorites')}
-                className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${
-                  filter === 'favorites' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'
-                }`}
-              >
-                <Heart className={`w-4 h-4 ${filter === 'favorites' ? 'fill-red-500 text-red-500' : ''}`} />
-                Favorites
-              </button>
+            <div className="mb-6 flex items-center justify-between gap-4 flex-wrap">
+              <div className="flex items-center gap-2 bg-neutral-900 w-fit p-1 rounded-lg border border-neutral-800">
+                <button
+                  onClick={() => setFilter('all')}
+                  className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                    filter === 'all' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'
+                  }`}
+                >
+                  All Photos
+                </button>
+                <button
+                  onClick={() => setFilter('favorites')}
+                  className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${
+                    filter === 'favorites' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'
+                  }`}
+                >
+                  <Heart className={`w-4 h-4 ${filter === 'favorites' ? 'fill-red-500 text-red-500' : ''}`} />
+                  Favorites
+                </button>
+              </div>
+              {scanProgress && (
+                <div className="flex items-center gap-2 text-sm text-neutral-400">
+                  <div className="animate-spin rounded-full h-3 w-3 border-2 border-neutral-700 border-t-neutral-300"></div>
+                  Loading {scanProgress.loaded} / {scanProgress.total}
+                </div>
+              )}
             </div>
 
-            {filteredPhotos.length === 0 ? (
+            {filteredPhotos.length === 0 && !scanProgress ? (
               <div className="flex flex-col items-center justify-center h-[40vh] text-neutral-500 space-y-4">
                 <div className="w-20 h-20 rounded-full bg-neutral-900 flex items-center justify-center border border-neutral-800">
                   <Heart className="w-8 h-8 opacity-50" />
@@ -251,19 +360,19 @@ export default function App() {
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
                 {filteredPhotos.map((photo, idx) => (
-                  <div 
-                    key={photo.name} 
+                  <div
+                    key={photo.name}
                     className="group relative aspect-square bg-neutral-900 rounded-xl overflow-hidden cursor-pointer ring-1 ring-white/5 hover:ring-white/20 transition-all"
                     onClick={() => setImmersiveIndex(idx)}
                   >
-                    <img 
-                      src={photo.url} 
-                      alt={photo.name} 
+                    <img
+                      src={photo.thumbUrl}
+                      alt={photo.name}
                       className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
                       loading="lazy"
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/0 to-black/0 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                    
+
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -271,8 +380,8 @@ export default function App() {
                       }}
                       className="absolute top-3 right-3 p-2.5 rounded-full bg-black/20 backdrop-blur-md hover:bg-black/60 transition-all border border-white/10 hover:scale-110"
                     >
-                      <Heart 
-                        className={`w-4 h-4 transition-colors ${photo.isFavorite ? 'fill-red-500 text-red-500' : 'text-white'}`} 
+                      <Heart
+                        className={`w-4 h-4 transition-colors ${photo.isFavorite ? 'fill-red-500 text-red-500' : 'text-white'}`}
                       />
                     </button>
                   </div>
@@ -304,7 +413,7 @@ export default function App() {
             <div className="text-white/70 font-mono text-sm bg-black/40 backdrop-blur-md px-4 py-2 rounded-full border border-white/10 pointer-events-auto">
               {immersiveIndex + 1} <span className="opacity-50">/</span> {filteredPhotos.length}
             </div>
-            <button 
+            <button
               onClick={() => setImmersiveIndex(null)}
               className="p-3 text-white/70 hover:text-white bg-black/40 backdrop-blur-md hover:bg-black/60 rounded-full transition-all border border-white/10 hover:scale-105 pointer-events-auto"
             >
@@ -314,15 +423,24 @@ export default function App() {
 
           {/* Main Image Area */}
           <div className="flex-1 w-full min-h-0 pt-24 pb-4 px-4 md:px-16 flex items-center justify-center relative">
-            <img 
-              src={filteredPhotos[immersiveIndex].url} 
-              alt={filteredPhotos[immersiveIndex].name}
-              className="max-w-full max-h-full object-contain rounded-md shadow-2xl"
-            />
-            
+            {immersiveUrl ? (
+              <img
+                src={immersiveUrl}
+                alt={filteredPhotos[immersiveIndex].name}
+                className="max-w-full max-h-full object-contain rounded-md shadow-2xl"
+              />
+            ) : (
+              // Show the thumbnail as a placeholder while the full-res file loads
+              <img
+                src={filteredPhotos[immersiveIndex].thumbUrl}
+                alt={filteredPhotos[immersiveIndex].name}
+                className="max-w-full max-h-full object-contain rounded-md shadow-2xl opacity-70"
+              />
+            )}
+
             {/* Navigation Controls */}
             {immersiveIndex > 0 && (
-              <button 
+              <button
                 onClick={() => setImmersiveIndex(immersiveIndex - 1)}
                 className="absolute left-4 md:left-8 p-4 text-white/70 hover:text-white bg-black/20 hover:bg-black/40 backdrop-blur-md rounded-full transition-all border border-white/10 hover:scale-110 z-50"
               >
@@ -331,7 +449,7 @@ export default function App() {
             )}
 
             {immersiveIndex < filteredPhotos.length - 1 && (
-              <button 
+              <button
                 onClick={() => setImmersiveIndex(immersiveIndex + 1)}
                 className="absolute right-4 md:right-8 p-4 text-white/70 hover:text-white bg-black/20 hover:bg-black/40 backdrop-blur-md rounded-full transition-all border border-white/10 hover:scale-110 z-50"
               >
@@ -350,8 +468,8 @@ export default function App() {
                 onClick={() => toggleFav(filteredPhotos[immersiveIndex].name)}
                 className="p-5 rounded-full bg-black/40 hover:bg-black/60 backdrop-blur-xl transition-all border border-white/10 hover:scale-110 shadow-2xl"
               >
-                <Heart 
-                  className={`w-8 h-8 transition-transform ${filteredPhotos[immersiveIndex].isFavorite ? 'fill-red-500 text-red-500' : 'text-white'}`} 
+                <Heart
+                  className={`w-8 h-8 transition-transform ${filteredPhotos[immersiveIndex].isFavorite ? 'fill-red-500 text-red-500' : 'text-white'}`}
                 />
               </button>
             </div>
