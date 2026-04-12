@@ -1,7 +1,7 @@
 {
   "name": "react-example",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "main": "electron/main.cjs",
   "repository": {
@@ -31,8 +31,14 @@
     "directories": {
       "output": "release"
     },
+    "icon": "assets/icon.png",
     "mac": {
-      "target": "dmg",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["arm64", "x64"]
+        }
+      ],
       "category": "public.app-category.photography",
       "artifactName": "Photo-Selector-${version}-${arch}.${ext}"
     },
