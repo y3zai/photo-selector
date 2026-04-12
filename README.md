@@ -1,5 +1,7 @@
 # Photo Selector
 
+Live: **https://photo-selector.y3z.ai**
+
 A local-first web app for browsing a folder of photos and marking favorites. Favorited images are copied into a `favorites/` subfolder on disk, so your selections persist as real files — no database, no upload, nothing leaves your machine.
 
 ## Features

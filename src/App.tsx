@@ -100,7 +100,7 @@ export default function App() {
     } catch (err: any) {
       console.error(err);
       if (err.name === 'SecurityError') {
-        setErrorMsg('File System Access is blocked in this preview. Please open the app in a new tab (using the button in the top right of AI Studio) to use this feature.');
+        setErrorMsg('File System Access was blocked. If this page is embedded in an iframe, open it directly in a new tab to use this feature.');
       } else if (err.name !== 'AbortError') {
         setErrorMsg(err.message || 'Failed to open directory.');
       }
