@@ -16,7 +16,7 @@
     "lint": "tsc --noEmit",
     "deploy": "npm run build && wrangler deploy",
     "cf:dev": "npm run build && wrangler dev",
-    "electron:dev": "concurrently -k -n vite,electron -c blue,magenta \"npm run dev\" \"wait-on http://localhost:3000 && electron .\"",
+    "electron:dev": "concurrently -k -n vite,electron -c blue,magenta \"npm run dev -- --mode electron\" \"wait-on http://localhost:3000 && electron .\"",
     "electron:build": "vite build --mode electron && electron-builder",
     "electron:release": "vite build --mode electron && electron-builder --publish onTag"
   },
