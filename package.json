@@ -18,7 +18,7 @@
     "cf:dev": "npm run build && wrangler dev",
     "electron:dev": "concurrently -k -n vite,electron -c blue,magenta \"npm run dev\" \"wait-on http://localhost:3000 && electron .\"",
     "electron:build": "vite build --mode electron && electron-builder",
-    "electron:release": "vite build --mode electron && electron-builder --publish always"
+    "electron:release": "vite build --mode electron && electron-builder --publish onTag"
   },
   "build": {
     "appId": "ai.y3z.photo-selector",
@@ -42,9 +42,7 @@
       "target": "AppImage"
     },
     "publish": {
-      "provider": "github",
-      "owner": "y3zai",
-      "repo": "photo-selector"
+      "provider": "github"
     }
   },
   "dependencies": {
