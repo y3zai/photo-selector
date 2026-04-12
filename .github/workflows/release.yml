@@ -14,8 +14,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macos-latest is Apple Silicon; macos-13 covers Intel Macs.
-        os: [macos-latest, macos-13, windows-latest, ubuntu-latest]
+        # macos-latest builds both arm64 and x64 dmgs via electron-builder
+        # cross-compile; we have no native deps so this works in one runner.
+        os: [macos-latest, windows-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
