@@ -14,11 +14,16 @@ function createWindow() {
     },
   });
 
-  // Auto-approve File System Access API prompts — in a packaged desktop app
-  // the OS folder picker already represents explicit user consent.
-  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
-    const allowed = new Set(['fileSystem', 'fileSystem:read', 'fileSystem:write']);
-    callback(allowed.has(permission));
+  // Auto-approve File System Access API prompts only for our own UI —
+  // packaged app loads file://, dev loads http://localhost:3000. Any other
+  // origin (e.g. something a compromised renderer navigated to) falls through
+  // to Electron's default deny.
+  const allowedPermissions = new Set(['fileSystem', 'fileSystem:read', 'fileSystem:write']);
+  const trustedOrigins = ['file://', 'http://localhost:3000'];
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+    const url = webContents.getURL();
+    const isTrusted = trustedOrigins.some((origin) => url.startsWith(origin));
+    callback(isTrusted && allowedPermissions.has(permission));
   });
 
   if (isDev) {
