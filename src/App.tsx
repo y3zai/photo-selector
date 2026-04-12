@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { FolderOpen, Heart, ChevronLeft, ChevronRight, X, AlertCircle, ExternalLink } from 'lucide-react';
+import { FolderOpen, Heart, ChevronLeft, ChevronRight, X, AlertCircle, ExternalLink, Github } from 'lucide-react';
 
 interface Photo {
   handle: any;
@@ -282,6 +282,19 @@ export default function App() {
           </>
         )}
       </main>
+
+      {/* Footer */}
+      <footer className="border-t border-neutral-800 mt-8 py-6 px-4 flex justify-center">
+        <a
+          href="https://github.com/y3zai/photo-selector"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-2 text-sm text-neutral-500 hover:text-neutral-200 transition-colors"
+        >
+          <Github className="w-4 h-4" />
+          View on GitHub
+        </a>
+      </footer>
 
       {/* Immersive View */}
       {immersiveIndex !== null && filteredPhotos[immersiveIndex] && (
