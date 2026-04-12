@@ -6,9 +6,11 @@ Desktop build of the app at <https://photo-selector.y3z.ai>. Uses the File Syste
 
 1. Download **`Photo-Selector-{{VERSION}}-arm64.dmg`** below.
 2. Open the dmg and drag **Photo Selector** into your Applications folder.
-3. The app is unsigned, so macOS will block it the first time. To open:
-   - Right-click the app → **Open** → **Open** on the warning dialog, **or**
-   - System Settings → Privacy & Security → scroll down → **Open Anyway**.
+3. First launch will show *"Photo Selector is damaged and can't be opened."* This is macOS Gatekeeper blocking unsigned apps. Run this once in Terminal to unblock:
+   ```
+   xattr -cr "/Applications/Photo Selector.app"
+   ```
+   Then double-click the app normally — it will open cleanly on every subsequent launch.
 
 ### macOS (Intel)
 
