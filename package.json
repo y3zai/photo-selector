@@ -4,6 +4,10 @@
   "version": "0.1.0",
   "type": "module",
   "main": "electron/main.cjs",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/y3zai/photo-selector.git"
+  },
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
     "build": "vite build",
@@ -13,7 +17,8 @@
     "deploy": "npm run build && wrangler deploy",
     "cf:dev": "npm run build && wrangler dev",
     "electron:dev": "concurrently -k -n vite,electron -c blue,magenta \"npm run dev\" \"wait-on http://localhost:3000 && electron .\"",
-    "electron:build": "vite build --mode electron && electron-builder"
+    "electron:build": "vite build --mode electron && electron-builder",
+    "electron:release": "vite build --mode electron && electron-builder --publish onTag"
   },
   "build": {
     "appId": "ai.y3z.photo-selector",
@@ -35,6 +40,9 @@
     },
     "linux": {
       "target": "AppImage"
+    },
+    "publish": {
+      "provider": "github"
     }
   },
   "dependencies": {
