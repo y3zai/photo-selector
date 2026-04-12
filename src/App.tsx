@@ -133,10 +133,12 @@ export default function App() {
         return [];
       });
       setImmersiveIndex(null);
-      setDirHandle(handle);
       setLoading(true);
 
+      // Resolve favorites before committing dirHandle so a failure here
+      // doesn't leave the UI in a "folder selected, no favHandle" limbo.
       const favoritesDir = await handle.getDirectoryHandle('favorites', { create: true });
+      setDirHandle(handle);
       setFavHandle(favoritesDir);
 
       const favNames = new Set<string>();
@@ -163,27 +165,36 @@ export default function App() {
       // Generate thumbnails progressively, flushing in batches so tiles appear as they finish.
       let batch: Photo[] = [];
       let loaded = 0;
+      const cancel = () => {
+        batch.forEach(p => URL.revokeObjectURL(p.thumbUrl));
+      };
       for (const { name, entry } of imageEntries) {
-        if (scanIdRef.current !== scanId) return;
+        if (scanIdRef.current !== scanId) { cancel(); return; }
+        let thumbUrl: string | null = null;
         try {
           const file = await entry.getFile();
-          const thumbUrl = await createThumbnail(file);
+          thumbUrl = await createThumbnail(file);
+        } catch (err) {
+          console.error(`Failed to load ${name}`, err);
+        }
+        // Bail immediately if a newer scan started while we were awaiting,
+        // revoking the just-created URL plus any unflushed batch entries.
+        if (scanIdRef.current !== scanId) {
+          if (thumbUrl) URL.revokeObjectURL(thumbUrl);
+          cancel();
+          return;
+        }
+        if (thumbUrl) {
           batch.push({
             handle: entry,
             name,
             thumbUrl,
             isFavorite: favNames.has(name),
           });
-        } catch (err) {
-          console.error(`Failed to load ${name}`, err);
         }
         loaded++;
 
         if (batch.length >= BATCH_SIZE) {
-          if (scanIdRef.current !== scanId) {
-            batch.forEach(p => URL.revokeObjectURL(p.thumbUrl));
-            return;
-          }
           const toAdd = batch;
           batch = [];
           setPhotos(prev => [...prev, ...toAdd]);
@@ -191,10 +202,6 @@ export default function App() {
         setScanProgress({ loaded, total: imageEntries.length });
       }
       if (batch.length > 0) {
-        if (scanIdRef.current !== scanId) {
-          batch.forEach(p => URL.revokeObjectURL(p.thumbUrl));
-          return;
-        }
         setPhotos(prev => [...prev, ...batch]);
       }
       setScanProgress(null);
@@ -212,24 +219,27 @@ export default function App() {
 
   const toggleFav = async (photoName: string) => {
     if (!favHandle) return;
-    const index = photos.findIndex(p => p.name === photoName);
-    if (index === -1) return;
-    const photo = photos[index];
-    const newPhotos = [...photos];
+    const photo = photos.find(p => p.name === photoName);
+    if (!photo) return;
 
     try {
+      let nextIsFavorite: boolean;
       if (photo.isFavorite) {
         await favHandle.removeEntry(photo.name);
-        newPhotos[index].isFavorite = false;
+        nextIsFavorite = false;
       } else {
         const file = await photo.handle.getFile();
         const newFileHandle = await favHandle.getFileHandle(photo.name, { create: true });
         const writable = await newFileHandle.createWritable();
         await writable.write(file);
         await writable.close();
-        newPhotos[index].isFavorite = true;
+        nextIsFavorite = true;
       }
-      setPhotos(newPhotos);
+      // Functional update so in-flight scan batches appended during the
+      // awaits above aren't clobbered by a stale `photos` snapshot.
+      setPhotos(prev =>
+        prev.map(p => (p.name === photoName ? { ...p, isFavorite: nextIsFavorite } : p))
+      );
     } catch (err) {
       console.error("Failed to toggle favorite", err);
       alert("Failed to toggle favorite. Make sure you granted read/write permissions.");
