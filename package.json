@@ -34,15 +34,15 @@
     "mac": {
       "target": "dmg",
       "category": "public.app-category.photography",
-      "artifactName": "${productName}-${version}-${arch}.${ext}"
+      "artifactName": "Photo-Selector-${version}-${arch}.${ext}"
     },
     "win": {
       "target": "nsis",
-      "artifactName": "${productName}-Setup-${version}.${ext}"
+      "artifactName": "Photo-Selector-Setup-${version}.${ext}"
     },
     "linux": {
       "target": "AppImage",
-      "artifactName": "${productName}-${version}.${ext}"
+      "artifactName": "Photo-Selector-${version}.${ext}"
     },
     "publish": {
       "provider": "github"
