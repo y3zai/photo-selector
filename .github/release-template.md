@@ -6,9 +6,9 @@ Desktop build of the app at <https://photo-selector.y3z.ai>. Uses the File Syste
 
 1. Download **`Photo-Selector-{{VERSION}}-arm64.dmg`** below.
 2. Open the dmg and drag **Photo Selector** into your Applications folder.
-3. First launch will show *"Photo Selector is damaged and can't be opened."* This is macOS Gatekeeper blocking unsigned apps. Run this once in Terminal to unblock:
+3. First launch will show *"Photo Selector is damaged and can't be opened."* This is macOS Gatekeeper blocking an app that isn't notarized with an Apple Developer ID. Run this once in Terminal to remove the quarantine flag:
    ```
-   xattr -cr "/Applications/Photo Selector.app"
+   xattr -dr com.apple.quarantine "/Applications/Photo Selector.app"
    ```
    Then double-click the app normally — it will open cleanly on every subsequent launch.
 
