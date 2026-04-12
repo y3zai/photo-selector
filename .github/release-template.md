@@ -12,7 +12,7 @@ Desktop build of the app at <https://photo-selector.y3z.ai>. Uses the File Syste
 
 ### macOS (Intel)
 
-1. Download **`Photo-Selector-{{VERSION}}.dmg`** below.
+1. Download **`Photo-Selector-{{VERSION}}-x64.dmg`** below.
 2. Same install steps as above.
 
 ### Windows
