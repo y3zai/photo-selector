@@ -14,7 +14,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest, ubuntu-latest]
+        # macos-latest is Apple Silicon; macos-13 covers Intel Macs.
+        os: [macos-latest, macos-13, windows-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -32,3 +33,30 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run electron:release
+
+  update-release-notes:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Combine install template with auto-generated changelog
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+
+          # Fill {{VERSION}} in the install template
+          sed "s/{{VERSION}}/$VERSION/g" .github/release-template.md > /tmp/notes.md
+
+          # Append GitHub's auto-generated "what changed" section
+          printf '\n' >> /tmp/notes.md
+          gh api "repos/$REPO/releases/generate-notes" \
+            -f tag_name="$TAG" \
+            --jq '.body' >> /tmp/notes.md
+
+          gh release edit "$TAG" --notes-file /tmp/notes.md
