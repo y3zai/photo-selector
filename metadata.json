@@ -1,0 +1,5 @@
+{
+  "name": "Photo Selector",
+  "description": "A web app to select photos from a local folder and copy favorites to a subfolder.",
+  "requestFramePermissions": []
+}
