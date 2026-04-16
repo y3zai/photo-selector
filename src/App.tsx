@@ -157,6 +157,13 @@ export default function App() {
         }
       }
 
+      // Sort by filename so the grid is consistent across OSes (the File
+      // System Access API returns entries in filesystem order, which differs
+      // between macOS, Windows, and Linux). Numeric+base sensitivity gives
+      // natural ordering for IMG_2.jpg / IMG_10.jpg and is case-insensitive.
+      const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+      imageEntries.sort((a, b) => collator.compare(a.name, b.name));
+
       setLoading(false);
       if (imageEntries.length === 0) {
         setScanProgress(null);
